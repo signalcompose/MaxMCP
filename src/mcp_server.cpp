@@ -441,49 +441,11 @@ void MCPServer::start() {
     }
 
     running_.store(true);
-    ConsoleLogger::log("MCP Server starting IO thread...");
-
-    io_thread_ = std::thread([this]() {
-        while (running_.load()) {
-            std::string line;
-
-            // Read line from stdin
-            if (!std::getline(std::cin, line)) {
-                // EOF or error
-                break;
-            }
-
-            try {
-                // Parse JSON-RPC request
-                auto request = json::parse(line);
-
-                // Handle request
-                auto response = handle_request(request);
-
-                // Write response to stdout
-                std::cout << response.dump() << "\n" << std::flush;
-
-            } catch (const json::parse_error& e) {
-                ConsoleLogger::log("MCP JSON parse error");
-                // Send error response
-                json error_response = {
-                    {"jsonrpc", "2.0"},
-                    {"error", {
-                        {"code", -32700},
-                        {"message", "Parse error"}
-                    }}
-                };
-                std::cout << error_response.dump() << "\n" << std::flush;
-
-            } catch (const std::exception& e) {
-                std::string error_msg = "MCP error: ";
-                error_msg += e.what();
-                ConsoleLogger::log(error_msg.c_str());
-            }
-        }
-
-        ConsoleLogger::log("MCP Server IO thread stopped");
-    });
+    ConsoleLogger::log("MCP Server initialized (ready for requests)");
+    
+    // Note: stdio communication is handled by maxmcp.server.mxo
+    // This external object manages stdin/stdout through its own thread
+    // MCPServer only provides request handling via handle_request_string()
 }
 
 void MCPServer::stop() {
@@ -493,12 +455,9 @@ void MCPServer::stop() {
 
     ConsoleLogger::log("MCP Server stopping...");
     running_.store(false);
-
-    // Wait for IO thread to finish
-    if (io_thread_.joinable()) {
-        io_thread_.join();
-    }
-
+    
+    // Note: No io_thread_ to join - stdio is managed by maxmcp.server.mxo
+    
     ConsoleLogger::log("MCP Server stopped");
 }
 
