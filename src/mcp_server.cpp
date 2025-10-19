@@ -18,13 +18,26 @@
 // Static member initialization
 MCPServer* MCPServer::instance_ = nullptr;
 
-// Structure for defer_low callback data
+// Structures for defer callback data
 struct t_add_object_data {
     t_maxmcp* patch;
     std::string obj_type;
     double x;
     double y;
     std::string varname;
+    json arguments;  // Object arguments (e.g., [440] for cycle~)
+};
+
+struct t_remove_object_data {
+    t_maxmcp* patch;
+    std::string varname;
+};
+
+struct t_set_attribute_data {
+    t_maxmcp* patch;
+    std::string varname;
+    std::string attribute;
+    json value;
 };
 
 // Defer callback for adding Max object
@@ -36,9 +49,24 @@ static void add_object_deferred(t_maxmcp* patch, t_symbol* s, long argc, t_atom*
         return;
     }
 
+    // Build object string with arguments
+    std::string obj_string = data->obj_type;
+
+    if (!data->arguments.is_null() && data->arguments.is_array()) {
+        for (const auto& arg : data->arguments) {
+            obj_string += " ";
+
+            if (arg.is_number()) {
+                obj_string += std::to_string(arg.get<double>());
+            } else if (arg.is_string()) {
+                obj_string += arg.get<std::string>();
+            }
+        }
+    }
+
     // Create object with newobject_sprintf
     t_object* obj = (t_object*)newobject_sprintf(data->patch->patcher, "@maxclass %s @patching_rect %.2f %.2f 50.0 20.0",
-                                                   data->obj_type.c_str(), data->x, data->y);
+                                                   obj_string.c_str(), data->x, data->y);
 
     if (obj) {
         // Set varname if provided
@@ -46,9 +74,102 @@ static void add_object_deferred(t_maxmcp* patch, t_symbol* s, long argc, t_atom*
             object_attr_setsym(obj, gensym("varname"), gensym(data->varname.c_str()));
         }
 
-        ConsoleLogger::log(("Object created: " + data->obj_type).c_str());
+        ConsoleLogger::log(("Object created: " + obj_string).c_str());
     } else {
-        ConsoleLogger::log(("Failed to create object: " + data->obj_type).c_str());
+        ConsoleLogger::log(("Failed to create object: " + obj_string).c_str());
+    }
+
+    delete data;
+}
+
+// Defer callback for removing Max object
+static void remove_object_deferred(t_maxmcp* patch, t_symbol* s, long argc, t_atom* argv) {
+    t_remove_object_data* data = (t_remove_object_data*)argv;
+
+    if (!data || !data->patch || !data->patch->patcher) {
+        delete data;
+        return;
+    }
+
+    // Iterate through box objects in patch to find object with varname
+    t_object* patcher = data->patch->patcher;
+    t_object* box = nullptr;
+    t_object* found_box = nullptr;
+
+    for (box = jpatcher_get_firstobject(patcher); box; box = jbox_get_nextobject(box)) {
+        // Get box's varname attribute
+        t_symbol* box_varname = object_attr_getsym(box, gensym("varname"));
+
+        if (box_varname && box_varname->s_name && data->varname == box_varname->s_name) {
+            found_box = box;
+            break;
+        }
+    }
+
+    if (found_box) {
+        // Remove box object
+        object_free(found_box);
+        ConsoleLogger::log(("Object removed: " + data->varname).c_str());
+    } else {
+        ConsoleLogger::log(("Object not found: " + data->varname).c_str());
+    }
+
+    delete data;
+}
+
+// Defer callback for setting object attribute
+static void set_attribute_deferred(t_maxmcp* patch, t_symbol* s, long argc, t_atom* argv) {
+    t_set_attribute_data* data = (t_set_attribute_data*)argv;
+
+    if (!data || !data->patch || !data->patch->patcher) {
+        delete data;
+        return;
+    }
+
+    // Find box with varname
+    t_object* patcher = data->patch->patcher;
+    t_object* box = nullptr;
+    t_object* found_box = nullptr;
+
+    for (box = jpatcher_get_firstobject(patcher); box; box = jbox_get_nextobject(box)) {
+        t_symbol* box_varname = object_attr_getsym(box, gensym("varname"));
+
+        if (box_varname && box_varname->s_name && data->varname == box_varname->s_name) {
+            found_box = box;
+            break;
+        }
+    }
+
+    if (!found_box) {
+        ConsoleLogger::log(("Object not found: " + data->varname).c_str());
+        delete data;
+        return;
+    }
+
+    // Set attribute based on value type
+    t_symbol* attr_sym = gensym(data->attribute.c_str());
+
+    if (data->value.is_number()) {
+        // Try double first
+        double val = data->value.get<double>();
+
+        // Check if it's an integer
+        if (val == (long)val) {
+            object_attr_setlong(found_box, attr_sym, (long)val);
+        } else {
+            object_attr_setfloat(found_box, attr_sym, val);
+        }
+
+        ConsoleLogger::log(("Attribute set: " + data->varname + "." + data->attribute).c_str());
+
+    } else if (data->value.is_string()) {
+        std::string str_val = data->value.get<std::string>();
+        object_attr_setsym(found_box, attr_sym, gensym(str_val.c_str()));
+
+        ConsoleLogger::log(("Attribute set: " + data->varname + "." + data->attribute).c_str());
+
+    } else {
+        ConsoleLogger::log(("Unsupported value type for attribute: " + data->attribute).c_str());
     }
 
     delete data;
@@ -193,6 +314,10 @@ json MCPServer::handle_request(const json& req) {
                                 {"varname", {
                                     {"type", "string"},
                                     {"description", "Variable name for the object (optional)"}
+                                }},
+                                {"arguments", {
+                                    {"type", "array"},
+                                    {"description", "Object arguments (e.g., [440] for 'cycle~ 440')"}
                                 }}
                             }},
                             {"required", json::array({"patch_id", "obj_type", "position"})}
@@ -218,6 +343,49 @@ json MCPServer::handle_request(const json& req) {
                         {"inputSchema", {
                             {"type", "object"},
                             {"properties", {}}
+                        }}
+                    },
+                    {
+                        {"name", "remove_max_object"},
+                        {"description", "Remove a Max object from a patch by varname"},
+                        {"inputSchema", {
+                            {"type", "object"},
+                            {"properties", {
+                                {"patch_id", {
+                                    {"type", "string"},
+                                    {"description", "Patch ID containing the object"}
+                                }},
+                                {"varname", {
+                                    {"type", "string"},
+                                    {"description", "Variable name of the object to remove"}
+                                }}
+                            }},
+                            {"required", json::array({"patch_id", "varname"})}
+                        }}
+                    },
+                    {
+                        {"name", "set_object_attribute"},
+                        {"description", "Set an attribute of a Max object"},
+                        {"inputSchema", {
+                            {"type", "object"},
+                            {"properties", {
+                                {"patch_id", {
+                                    {"type", "string"},
+                                    {"description", "Patch ID containing the object"}
+                                }},
+                                {"varname", {
+                                    {"type", "string"},
+                                    {"description", "Variable name of the object"}
+                                }},
+                                {"attribute", {
+                                    {"type", "string"},
+                                    {"description", "Attribute name to set"}
+                                }},
+                                {"value", {
+                                    {"description", "Attribute value (number, string, or array)"}
+                                }}
+                            }},
+                            {"required", json::array({"patch_id", "varname", "attribute", "value"})}
                         }}
                     }
                 })}
@@ -278,6 +446,7 @@ json MCPServer::execute_tool(const std::string& tool, const json& params) {
         std::string patch_id = params.value("patch_id", "");
         std::string obj_type = params.value("obj_type", "");
         std::string varname = params.value("varname", "");
+        json arguments = params.value("arguments", json::array());
 
         if (patch_id.empty() || obj_type.empty()) {
             return {
@@ -318,7 +487,8 @@ json MCPServer::execute_tool(const std::string& tool, const json& params) {
             obj_type,
             x,
             y,
-            varname
+            varname,
+            arguments
         };
 
         // Defer to main thread (CRITICAL for thread safety)
@@ -329,7 +499,107 @@ json MCPServer::execute_tool(const std::string& tool, const json& params) {
                 {"status", "success"},
                 {"patch_id", patch_id},
                 {"obj_type", obj_type},
-                {"position", json::array({x, y})}
+                {"position", json::array({x, y})},
+                {"arguments", arguments}
+            }}
+        };
+
+    } else if (tool == "remove_max_object") {
+        // Parse parameters
+        std::string patch_id = params.value("patch_id", "");
+        std::string varname = params.value("varname", "");
+
+        if (patch_id.empty() || varname.empty()) {
+            return {
+                {"error", {
+                    {"code", -32602},
+                    {"message", "Missing required parameters: patch_id and varname"}
+                }}
+            };
+        }
+
+        // Find patch
+        t_maxmcp* patch = PatchRegistry::find_patch(patch_id);
+        if (!patch) {
+            return {
+                {"error", {
+                    {"code", -32602},
+                    {"message", "Patch not found: " + patch_id}
+                }}
+            };
+        }
+
+        // Create defer data
+        t_remove_object_data* data = new t_remove_object_data{
+            patch,
+            varname
+        };
+
+        // Defer to main thread
+        defer(patch, (method)remove_object_deferred, gensym("remove_object"), 1, (t_atom*)data);
+
+        return {
+            {"result", {
+                {"status", "success"},
+                {"patch_id", patch_id},
+                {"varname", varname}
+            }}
+        };
+
+    } else if (tool == "set_object_attribute") {
+        // Parse parameters
+        std::string patch_id = params.value("patch_id", "");
+        std::string varname = params.value("varname", "");
+        std::string attribute = params.value("attribute", "");
+
+        if (patch_id.empty() || varname.empty() || attribute.empty()) {
+            return {
+                {"error", {
+                    {"code", -32602},
+                    {"message", "Missing required parameters: patch_id, varname, and attribute"}
+                }}
+            };
+        }
+
+        if (!params.contains("value")) {
+            return {
+                {"error", {
+                    {"code", -32602},
+                    {"message", "Missing required parameter: value"}
+                }}
+            };
+        }
+
+        json value = params["value"];
+
+        // Find patch
+        t_maxmcp* patch = PatchRegistry::find_patch(patch_id);
+        if (!patch) {
+            return {
+                {"error", {
+                    {"code", -32602},
+                    {"message", "Patch not found: " + patch_id}
+                }}
+            };
+        }
+
+        // Create defer data
+        t_set_attribute_data* data = new t_set_attribute_data{
+            patch,
+            varname,
+            attribute,
+            value
+        };
+
+        // Defer to main thread
+        defer(patch, (method)set_attribute_deferred, gensym("set_attribute"), 1, (t_atom*)data);
+
+        return {
+            {"result", {
+                {"status", "success"},
+                {"patch_id", patch_id},
+                {"varname", varname},
+                {"attribute", attribute}
             }}
         };
 
