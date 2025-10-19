@@ -10,7 +10,6 @@
 #ifndef MCP_SERVER_H
 #define MCP_SERVER_H
 
-#include <thread>
 #include <atomic>
 #include <nlohmann/json.hpp>
 
@@ -20,13 +19,14 @@ using json = nlohmann::json;
  * @brief MCP Server for stdio-based JSON-RPC communication
  *
  * Singleton class managing MCP protocol communication with Claude Code.
- * Runs IO thread for stdin/stdout, handles JSON-RPC requests, and executes tools.
+ * Handles JSON-RPC requests and executes tools.
+ *
+ * Note: stdio I/O is managed by maxmcp.server.mxo external object.
  */
 class MCPServer {
 private:
     static MCPServer* instance_;
 
-    std::thread io_thread_;
     std::atomic<bool> running_{false};
 
     /**
