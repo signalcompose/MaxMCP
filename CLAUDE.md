@@ -290,6 +290,48 @@ gh pr create --base develop --head feature/123-add-object-tool
 3. **Run all tests** (`ctest --output-on-failure`)
 4. **Check for compiler warnings** (zero warnings policy)
 
+### Deferred Issues Management Rule
+
+**When deferring work to a future phase:**
+
+1. **Create GitHub Issue immediately**
+   - Document the problem/requirement clearly
+   - Add appropriate labels (enhancement, bug, etc.)
+   - Add phase label (e.g., "Phase 4")
+   - Set milestone if applicable
+
+2. **Add to Implementation Plan**
+   - Update `docs/implementation-plan.md`
+   - Add explicit task to the appropriate phase
+   - Include issue reference (e.g., "Issue #4")
+   - Update timeline and Definition of Done
+
+3. **Document in Issue**
+   - Reference the implementation plan location
+   - Note which phase/task will address it
+
+**Example Workflow:**
+
+```bash
+# User: "Let's defer the Info.plist fix to Phase 4"
+
+# 1. Create issue
+gh issue create --title "Fix Max version warning in Info.plist" \
+  --body "..." --label "enhancement,Phase 4"
+
+# 2. Update implementation plan
+# Edit docs/implementation-plan.md to add Task X.X
+
+# 3. Cross-reference
+gh issue comment <issue#> --body "Will be addressed in Phase 4, Task 4.4 (see docs/implementation-plan.md)"
+```
+
+**Why This Rule Exists:**
+- Prevents forgotten work
+- Maintains single source of truth (implementation plan + GitHub issues)
+- Provides clear tracking and accountability
+- Ensures phase planning includes all deferred work
+
 ---
 
 ## Build and Test
