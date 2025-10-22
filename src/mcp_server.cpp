@@ -464,10 +464,28 @@ void MCPServer::stop() {
 json MCPServer::handle_request(const json& req) {
     std::string method = req.value("method", "");
 
-    if (method == "tools/list") {
+    if (method == "initialize") {
+        // Handle MCP initialize handshake
+        return {
+            {"jsonrpc", "2.0"},
+            {"id", req.value("id", nullptr)},
+            {"result", {
+                {"protocolVersion", "2024-11-05"},
+                {"capabilities", {
+                    {"tools", json::object()}
+                }},
+                {"serverInfo", {
+                    {"name", "maxmcp"},
+                    {"version", "1.0.0"}
+                }}
+            }}
+        };
+
+    } else if (method == "tools/list") {
         // Return list of available tools
         return {
             {"jsonrpc", "2.0"},
+            {"id", req.value("id", nullptr)},
             {"result", {
                 {"tools", json::array({
                     {
@@ -696,12 +714,19 @@ json MCPServer::handle_request(const json& req) {
         std::string tool_name = req["params"]["name"];
         json arguments = req.value("params", json::object()).value("arguments", json::object());
 
-        return execute_tool(tool_name, arguments);
+        json result = execute_tool(tool_name, arguments);
+
+        return {
+            {"jsonrpc", "2.0"},
+            {"id", req.value("id", nullptr)},
+            {"result", result}
+        };
 
     } else {
         // Unknown method
         return {
             {"jsonrpc", "2.0"},
+            {"id", req.value("id", nullptr)},
             {"error", {
                 {"code", -32601},
                 {"message", "Method not found"}
