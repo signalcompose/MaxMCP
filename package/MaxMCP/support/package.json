@@ -1,0 +1,16 @@
+{
+  "name": "maxmcp-bridge",
+  "version": "1.0.0",
+  "description": "MCP bridge for MaxMCP (stdio to UDP)",
+  "private": true,
+  "scripts": {
+    "build": "esbuild bridge-src/maxmcp-mcp-bridge.js --bundle --platform=node --outfile=maxmcp-mcp-bridge.tmp.js && (echo '#!/usr/bin/env node' && cat maxmcp-mcp-bridge.tmp.js) > maxmcp-mcp-bridge.js && rm maxmcp-mcp-bridge.tmp.js && chmod +x maxmcp-mcp-bridge.js",
+    "dev": "node bridge-src/maxmcp-mcp-bridge.js --debug"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "esbuild": "^0.19.0"
+  },
+  "author": "MaxMCP",
+  "license": "MIT"
+}

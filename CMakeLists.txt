@@ -62,6 +62,8 @@ set(SERVER_SRC
     src/maxmcp_server.h
     src/mcp_server.cpp
     src/mcp_server.h
+    src/udp_server.cpp
+    src/udp_server.h
     ${UTILS_SRC}
 )
 

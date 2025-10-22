@@ -14,11 +14,15 @@
 #include "ext.h"
 #include "ext_obex.h"
 #include <string>
+#include <atomic>
+
+// Forward declaration
+class UDPServer;
 
 /**
  * @brief MaxMCP Server object structure
  *
- * Singleton Max external that manages MCP server lifecycle and stdio communication.
+ * Singleton Max external that manages MCP server lifecycle and UDP communication.
  */
 typedef struct _maxmcp_server {
     t_object ob;              ///< Max object header (must be first)
@@ -27,11 +31,17 @@ typedef struct _maxmcp_server {
     // MCP Protocol state
     bool initialized;         ///< MCP initialize handshake completed
     std::string protocol_version; ///< Negotiated protocol version
+    std::atomic<bool> running; ///< Server running state
 
-    // stdio communication
-    void* stdin_qelem;        ///< Qelem for stdin processing (main thread)
-    std::string input_buffer; ///< Buffer for incomplete stdin lines
-    bool running;             ///< Server running state
+    // UDP server
+    UDPServer* udp_server;    ///< UDP server instance
+
+    // Message processing
+    void* qelem;              ///< Queue element for deferred message processing
+
+    // Attributes
+    t_atom_long port;         ///< UDP server port (@port attribute)
+    bool debug;               ///< Debug mode (@debug attribute)
 
 } t_maxmcp_server;
 
@@ -40,9 +50,10 @@ void* maxmcp_server_new(t_symbol* s, long argc, t_atom* argv);
 void maxmcp_server_free(t_maxmcp_server* x);
 void maxmcp_server_assist(t_maxmcp_server* x, void* b, long m, long a, char* s);
 
-// MCP Protocol handlers
-void maxmcp_server_stdin_task(t_maxmcp_server* x);
-void maxmcp_server_handle_request(t_maxmcp_server* x, const std::string& request);
-void maxmcp_server_send_response(t_maxmcp_server* x, const std::string& response);
+// Attribute accessors
+t_max_err maxmcp_server_port_set(t_maxmcp_server* x, t_object* attr, long ac, t_atom* av);
+
+// Message processing
+void maxmcp_server_process_messages(t_maxmcp_server* x);
 
 #endif // MAXMCP_SERVER_H

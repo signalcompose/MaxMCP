@@ -7,12 +7,12 @@
 
 #include "maxmcp_server.h"
 #include "mcp_server.h"
+#include "udp_server.h"
 #include "utils/console_logger.h"
 #include <nlohmann/json.hpp>
 #include <iostream>
 #include <sstream>
-#include <thread>
-#include <atomic>
+#include <cstdlib>
 
 using json = nlohmann::json;
 
@@ -42,16 +42,21 @@ void ext_main(void* r) {
 
     class_addmethod(c, (method)maxmcp_server_assist, "assist", A_CANT, 0);
 
+    // Register attributes
+    CLASS_ATTR_LONG(c, "port", 0, t_maxmcp_server, port);
+    CLASS_ATTR_LABEL(c, "port", 0, "UDP Port");
+    CLASS_ATTR_DEFAULT(c, "port", 0, "7400");
+    CLASS_ATTR_ACCESSORS(c, "port", nullptr, (method)maxmcp_server_port_set);
+
+    CLASS_ATTR_CHAR(c, "debug", 0, t_maxmcp_server, debug);
+    CLASS_ATTR_STYLE_LABEL(c, "debug", 0, "onoff", "Debug Mode");
+    CLASS_ATTR_DEFAULT(c, "debug", 0, "0");
+
     class_register(CLASS_BOX, c);
     maxmcp_server_class = c;
 
-    post("MaxMCP Server external loaded");
+    post("MaxMCP Server external loaded (UDP mode)");
 }
-
-// Forward declarations
-static void maxmcp_server_stdin_qelem_fn(t_maxmcp_server* x);
-static std::atomic<bool> g_stdin_thread_running(false);
-static std::thread g_stdin_thread;
 
 void* maxmcp_server_new(t_symbol* s, long argc, t_atom* argv) {
     // Singleton check
@@ -67,13 +72,42 @@ void* maxmcp_server_new(t_symbol* s, long argc, t_atom* argv) {
         x->initialized = false;
         x->protocol_version = "";
         x->running = true;
-        x->input_buffer = "";
 
-        // Create qelem for stdin processing (on main thread)
-        x->stdin_qelem = qelem_new(x, (method)maxmcp_server_stdin_qelem_fn);
+        // Initialize attributes with defaults
+        x->port = 7400;
+        x->debug = false;
 
-        // Create outlet for log messages (optional)
+        // Create outlet for JSON-RPC responses (optional, for debugging)
         x->outlet_log = outlet_new(x, nullptr);
+
+        // Create qelem for deferred message processing
+        x->qelem = qelem_new(x, (method)maxmcp_server_process_messages);
+
+        // Process attributes
+        attr_args_process(x, argc, argv);
+
+        // Check environment variable for port
+        if (const char* env_port = std::getenv("MAXMCP_PORT")) {
+            x->port = std::atoi(env_port);
+        }
+
+        // Create UDP server
+        x->udp_server = new UDPServer((int)x->port);
+
+        // Set message callback - triggers qelem when message arrives
+        x->udp_server->set_message_callback([x](const std::string& message) {
+            // Message received callback (runs in UDP thread)
+            // Trigger qelem to process in Max main thread
+            qelem_set(x->qelem);
+        });
+
+        // Start UDP server
+        if (!x->udp_server->start()) {
+            object_error((t_object*)x, "Failed to start UDP server");
+            delete x->udp_server;
+            x->udp_server = nullptr;
+            return nullptr;
+        }
 
         // Start MCP server
         MCPServer::get_instance()->start();
@@ -81,21 +115,8 @@ void* maxmcp_server_new(t_symbol* s, long argc, t_atom* argv) {
         // Set global singleton
         g_server_instance = x;
 
-        // Start stdin reader thread
-        g_stdin_thread_running = true;
-        g_stdin_thread = std::thread([x]() {
-            while (g_stdin_thread_running && x->running) {
-                std::string line;
-                if (std::getline(std::cin, line)) {
-                    x->input_buffer += line + "\n";
-                    // Trigger qelem to process on main thread
-                    qelem_set(x->stdin_qelem);
-                }
-            }
-        });
-
-        ConsoleLogger::log("MaxMCP Server started with stdio communication");
-        object_post((t_object*)x, "MaxMCP Server initialized (singleton)");
+        object_post((t_object*)x, "MaxMCP Server started on port %ld", x->port);
+        ConsoleLogger::log(("maxmcp.server: UDP server listening on port " + std::to_string(x->port)).c_str());
     }
 
     return x;
@@ -103,16 +124,20 @@ void* maxmcp_server_new(t_symbol* s, long argc, t_atom* argv) {
 
 void maxmcp_server_free(t_maxmcp_server* x) {
     if (x) {
-        // Stop stdin thread
+        // Stop running
         x->running = false;
-        g_stdin_thread_running = false;
-        if (g_stdin_thread.joinable()) {
-            g_stdin_thread.join();
+
+        // Stop UDP server
+        if (x->udp_server) {
+            x->udp_server->stop();
+            delete x->udp_server;
+            x->udp_server = nullptr;
         }
 
         // Free qelem
-        if (x->stdin_qelem) {
-            qelem_free(x->stdin_qelem);
+        if (x->qelem) {
+            qelem_free(x->qelem);
+            x->qelem = nullptr;
         }
 
         // Stop MCP server
@@ -147,85 +172,125 @@ t_maxmcp_server* maxmcp_server_get_instance() {
 }
 
 /**
- * @brief Qelem callback for processing stdin on main thread
+ * @brief Handle incoming MCP request from UDP
  *
- * Processes buffered stdin input line-by-line.
- * Called on Max main thread via qelem.
+ * Receives JSON-RPC request as Max message, processes it, and outputs response to outlet.
  *
  * @param x Server instance
+ * @param s Symbol (unused)
+ * @param argc Number of atoms
+ * @param argv Array of atoms containing JSON-RPC request string
  */
-static void maxmcp_server_stdin_qelem_fn(t_maxmcp_server* x) {
-    if (!x || x->input_buffer.empty()) {
+void maxmcp_server_request(t_maxmcp_server* x, t_symbol* s, long argc, t_atom* argv) {
+    if (argc < 1) {
+        object_error((t_object*)x, "request: expected JSON-RPC string");
         return;
     }
 
-    // Process all complete lines in buffer
-    std::istringstream stream(x->input_buffer);
-    std::string line;
-    std::string remaining;
-
-    while (std::getline(stream, line)) {
-        if (!line.empty()) {
-            maxmcp_server_handle_request(x, line);
+    // Build JSON string from atoms (could be single symbol or list of symbols)
+    std::string request;
+    if (atom_gettype(argv) == A_SYM) {
+        // Single symbol
+        request = atom_getsym(argv)->s_name;
+    } else {
+        // List of atoms - concatenate them
+        for (long i = 0; i < argc; i++) {
+            if (atom_gettype(&argv[i]) == A_SYM) {
+                request += atom_getsym(&argv[i])->s_name;
+            } else if (atom_gettype(&argv[i]) == A_LONG) {
+                request += std::to_string(atom_getlong(&argv[i]));
+            } else if (atom_gettype(&argv[i]) == A_FLOAT) {
+                request += std::to_string(atom_getfloat(&argv[i]));
+            }
         }
     }
 
-    // Clear processed buffer
-    x->input_buffer.clear();
-}
-
-/**
- * @brief Handle incoming MCP request
- *
- * Parses JSON-RPC request and routes to appropriate handler.
- *
- * @param x Server instance
- * @param request JSON-RPC request string
- */
-void maxmcp_server_handle_request(t_maxmcp_server* x, const std::string& request) {
     try {
-        json req = json::parse(request);
-
-        // Extract JSON-RPC fields
-        std::string method = req.value("method", "");
-        json params = req.value("params", json::object());
-        auto id = req.value("id", json(nullptr));
-
-        ConsoleLogger::log(("MCP Request: " + method).c_str());
+        ConsoleLogger::log(("MCP Request received (" + std::to_string(request.length()) + " bytes)").c_str());
 
         // Route to MCP server
         std::string response = MCPServer::get_instance()->handle_request_string(request);
 
-        // Send response
-        maxmcp_server_send_response(x, response);
+        // Output response to outlet (will be sent via UDP)
+        t_atom response_atom;
+        atom_setsym(&response_atom, gensym(response.c_str()));
+        outlet_anything(x->outlet_log, gensym("response"), 1, &response_atom);
+
+        ConsoleLogger::log(("MCP Response sent (" + std::to_string(response.length()) + " bytes)").c_str());
 
     } catch (const std::exception& e) {
-        object_error((t_object*)x, "JSON parse error: %s", e.what());
+        object_error((t_object*)x, "request error: %s", e.what());
 
-        // Send error response if request had an id
+        // Send error response
         json error_response = {
             {"jsonrpc", "2.0"},
             {"error", {
-                {"code", -32700},
-                {"message", "Parse error"}
+                {"code", -32603},
+                {"message", std::string("Internal error: ") + e.what()}
             }},
             {"id", nullptr}
         };
-        maxmcp_server_send_response(x, error_response.dump());
+
+        t_atom error_atom;
+        atom_setsym(&error_atom, gensym(error_response.dump().c_str()));
+        outlet_anything(x->outlet_log, gensym("response"), 1, &error_atom);
     }
 }
 
 /**
- * @brief Send MCP response to stdout
- *
- * Writes JSON-RPC response to stdout with newline.
- *
- * @param x Server instance
- * @param response JSON-RPC response string
+ * @brief Attribute setter for port
  */
-void maxmcp_server_send_response(t_maxmcp_server* x, const std::string& response) {
-    std::cout << response << std::endl;
-    std::cout.flush();
+t_max_err maxmcp_server_port_set(t_maxmcp_server* x, t_object* attr, long ac, t_atom* av) {
+    if (ac && av) {
+        x->port = atom_getlong(av);
+        ConsoleLogger::log(("Port set to " + std::to_string(x->port)).c_str());
+    }
+    return MAX_ERR_NONE;
+}
 
-    ConsoleLogger::log(("MCP Response sent (" + std::to_string(response.length()) + " bytes)").c_str());
+/**
+ * @brief Process UDP messages (called periodically or via idle)
+ *
+ * This should be called from Max's main thread to safely process
+ * messages received from UDP clients.
+ */
+void maxmcp_server_process_messages(t_maxmcp_server* x) {
+    if (!x || !x->udp_server) {
+        return;
+    }
+
+    // Process all pending messages
+    std::string message;
+    while (x->udp_server->get_received_message(message)) {
+        try {
+            if (x->debug) {
+                ConsoleLogger::log(("Processing UDP message (" + std::to_string(message.length()) + " bytes)").c_str());
+            }
+
+            // Route to MCP server
+            std::string response = MCPServer::get_instance()->handle_request_string(message);
+
+            // Send response back via UDP
+            x->udp_server->send_message(response);
+
+            if (x->debug) {
+                ConsoleLogger::log(("Response sent via UDP (" + std::to_string(response.length()) + " bytes)").c_str());
+            }
+
+        } catch (const std::exception& e) {
+            object_error((t_object*)x, "Request processing error: %s", e.what());
+
+            // Send error response
+            json error_response = {
+                {"jsonrpc", "2.0"},
+                {"error", {
+                    {"code", -32603},
+                    {"message", std::string("Internal error: ") + e.what()}
+                }},
+                {"id", nullptr}
+            };
+
+            x->udp_server->send_message(error_response.dump());
+        }
+    }
 }
