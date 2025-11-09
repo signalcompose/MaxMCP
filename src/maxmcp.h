@@ -26,6 +26,10 @@ typedef struct _maxmcp {
     std::string display_name; ///< User-friendly name for patch
     std::string patcher_name; ///< Max patcher filename
     t_object* patcher;        ///< Reference to parent patcher object
+
+    // Attributes
+    t_symbol* alias;          ///< Custom patch ID override (@alias attribute)
+    t_symbol* group;          ///< Patch group name (@group attribute)
 } t_maxmcp;
 
 // Function prototypes
