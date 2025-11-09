@@ -40,6 +40,17 @@ void ext_main(void* r) {
     // Add notify method for patcher lifecycle events
     class_addmethod(c, (method)maxmcp_notify, "notify", A_CANT, 0);
 
+    // Add attributes
+    CLASS_ATTR_SYM(c, "alias", 0, t_maxmcp, alias);
+    CLASS_ATTR_LABEL(c, "alias", 0, "Custom Patch ID");
+    CLASS_ATTR_BASIC(c, "alias", 0);
+    CLASS_ATTR_SAVE(c, "alias", 0);
+
+    CLASS_ATTR_SYM(c, "group", 0, t_maxmcp, group);
+    CLASS_ATTR_LABEL(c, "group", 0, "Patch Group");
+    CLASS_ATTR_BASIC(c, "group", 0);
+    CLASS_ATTR_SAVE(c, "group", 0);
+
     // Register the class
     class_register(CLASS_BOX, c);
     maxmcp_class = c;
@@ -77,10 +88,23 @@ void* maxmcp_new(t_symbol* s, long argc, t_atom* argv) {
             }
         }
 
+        // Initialize attributes
+        x->alias = gensym("");
+        x->group = gensym("");
+
         // Generate patch ID: {patchname}_{uuid8}
         new (&x->patch_id) std::string(generate_patch_id(patcher_name_str, 8));
         new (&x->display_name) std::string(remove_extension(patcher_name_str));
         new (&x->patcher_name) std::string(patcher_name_str);
+
+        // Process attributes from arguments (@alias, @group, etc.)
+        attr_args_process(x, argc, argv);
+
+        // If alias attribute is set, override patch_id
+        if (x->alias && x->alias->s_name && strlen(x->alias->s_name) > 0) {
+            x->patch_id = x->alias->s_name;
+            object_post((t_object*)x, "Using custom patch ID: %s", x->patch_id.c_str());
+        }
 
         // Register with global patch registry
         PatchRegistry::register_patch(x);
@@ -92,11 +116,8 @@ void* maxmcp_new(t_symbol* s, long argc, t_atom* argv) {
 
         // Post initialization message
         object_post((t_object*)x, "maxmcp client initialized (ID: %s)", x->patch_id.c_str());
-
-        // Parse arguments if provided (optional display_name)
-        if (argc > 0 && atom_gettype(argv) == A_SYM) {
-            x->display_name = atom_getsym(argv)->s_name;
-            object_post((t_object*)x, "Display name: %s", x->display_name.c_str());
+        if (x->group && x->group->s_name && strlen(x->group->s_name) > 0) {
+            object_post((t_object*)x, "Group: %s", x->group->s_name);
         }
     }
 
