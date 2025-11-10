@@ -424,6 +424,40 @@ ctest -R PatchIDGeneration --verbose
 ctest -T coverage
 ```
 
+### Development Workflow
+
+**🚨 CRITICAL: Always deploy changes to Max Package after modifications**
+
+Max only reads from `~/Documents/Max 9/Packages/MaxMCP/`. Changes in the project directory are not visible until deployed.
+
+#### Deploy External (.mxo)
+
+After building:
+```bash
+rm -rf "$HOME/Documents/Max 9/Packages/MaxMCP/externals/"*.mxo
+cp -R /Users/yamato/externals/maxmcp.mxo \
+      "$HOME/Documents/Max 9/Packages/MaxMCP/externals/"
+```
+
+#### Deploy Examples/Support Files
+
+After modifying files in `package/MaxMCP/`:
+```bash
+# Clean deploy (recommended)
+rm -rf ~/Documents/Max\ 9/Packages/MaxMCP/examples/
+cp -r package/MaxMCP/examples ~/Documents/Max\ 9/Packages/MaxMCP/
+
+# Or deploy entire package directory
+cp -r package/MaxMCP/support ~/Documents/Max\ 9/Packages/MaxMCP/
+```
+
+**Workflow**:
+1. Modify files in project directory
+2. Build if needed (`cmake --build build`)
+3. **Deploy to Max Package** (above commands)
+4. Test in Max
+5. Git commit
+
 ### Writing Tests
 
 ```cpp
