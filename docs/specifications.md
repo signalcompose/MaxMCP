@@ -1,4 +1,8 @@
-# MaxMCP v2.0 - Complete Redesign Specification
+# MaxMCP - Complete Design Specification
+
+**Version**: 1.0.0-alpha
+**Last Updated**: 2025-10-19
+**Status**: Phase 1 MVP Complete
 
 > **Comprehensive specification for new project**
 > A new Claude Code instance can read this document and immediately begin implementation.
@@ -18,7 +22,8 @@ Develop a native MCP server external object for Max/MSP, enabling Claude Code to
 
 ### Tech Stack (Confirmed)
 - **C/C++** (Max SDK 8.6+)
-- **stdio-based MCP** (No Socket.IO/Node.js)
+- **WebSocket** (libwebsockets 4.4.1)
+- **Node.js Bridge** (stdio-to-WebSocket translation)
 - **CMake** (Cross-platform builds)
 - **JSON** (nlohmann/json)
 
@@ -43,18 +48,128 @@ Develop a native MCP server external object for Max/MSP, enabling Claude Code to
     this.patcher           this.patcher
 ```
 
-### Comparison with Old Architecture
-| Component | Old | New |
-|-----------|-----|-----|
-| Python MCP Server | ✓ | **REMOVED** |
-| Node.js Socket.IO | ✓ | **REMOVED** |
-| max_mcp_node.js | ✓ | **REMOVED** |
-| max_mcp.js | ✓ | **REMOVED** |
-| mcp-router.js | ✓ | **REMOVED** |
-| mcp_client.js | ✓ | **REMOVED** |
-| **[maxmcp] C++ External** | ✗ | **NEW** |
+### Architecture Approach
 
-**Result**: 6 files → 1 file (99% reduction)
+**Two-Component Design**: Separation of server and bridge responsibilities.
+
+- **maxmcp.server.mxo**: WebSocket server handling JSON-RPC over WebSocket
+- **websocket-mcp-bridge.js**: stdio-to-WebSocket bridge (Node.js)
+
+### Communication Protocol
+
+**WebSocket-based MCP JSON-RPC**:
+
+```
+Claude Code (stdio MCP)
+    ↓ stdin/stdout
+websocket-mcp-bridge.js (Node.js)
+    ↓ WebSocket (ws://localhost:7400)
+maxmcp.server.mxo (C++ / libwebsockets)
+    ↓ Max API
+Max/MSP Patches
+```
+
+### WebSocket Server (maxmcp.server.mxo)
+
+**Library**: libwebsockets 4.4.1
+**Protocol**: WebSocket over TCP
+**Default Port**: 7400 (chosen to avoid conflicts with other MCP servers like Serena)
+**Test Port**: 7401 (used in unit tests)
+**Message Format**: JSON-RPC 2.0 (text frames)
+
+**Connection Flow**:
+1. Client connects to `ws://localhost:7400` or `wss://remote:7400`
+2. Optional authentication via `Authorization: Bearer <token>` header
+3. Bidirectional JSON-RPC message exchange
+4. Server maintains connection until client disconnects or error occurs
+
+**Multi-Client Support**:
+- Server accepts multiple simultaneous WebSocket connections
+- Each client receives a unique client_id (UUID)
+- Requests are queued (FIFO) to ensure atomic patch operations
+- Thread-safe client list management
+
+**Example Request (WebSocket text frame)**:
+```json
+{"jsonrpc":"2.0","method":"tools/call","params":{"name":"add_max_object","arguments":{"patch_id":"synth_a7f2","obj_type":"cycle~","x":100,"y":100,"varname":"osc1","arguments":[440]}},"id":1}
+```
+
+**Example Response (WebSocket text frame)**:
+```json
+{"jsonrpc":"2.0","result":{"status":"success","patch_id":"synth_a7f2","varname":"osc1"},"id":1}
+```
+
+**Error Response**:
+```json
+{"jsonrpc":"2.0","error":{"code":-32700,"message":"Parse error"},"id":null}
+```
+
+**Authentication**:
+- Optional token-based authentication
+- Configured via `@auth` attribute: `[maxmcp.server @port 7400 @auth "secret-token"]`
+- Client must send `Authorization: Bearer secret-token` header
+- Unauthenticated connections are rejected with close code 1008 (Policy Violation)
+
+**Thread Safety**:
+1. libwebsockets event loop runs in background thread
+2. qelem defers JSON processing to Max main thread
+3. All Max API calls occur on main thread only
+4. Client list protected by mutex
+
+### WebSocket MCP Bridge (websocket-mcp-bridge.js)
+
+**Purpose**: Translate stdio MCP (Claude Code) to WebSocket (Max)
+
+**Implementation**:
+```javascript
+// stdin (Claude Code) → WebSocket (Max)
+process.stdin.on('data', (data) => {
+  ws.send(data.toString());
+});
+
+// WebSocket (Max) → stdout (Claude Code)
+ws.on('message', (data) => {
+  console.log(data.toString());
+});
+```
+
+**Usage**:
+```bash
+node websocket-mcp-bridge.js ws://localhost:7400 [auth-token]
+```
+
+**MCP Server Configuration** (`~/.claude.json`):
+```json
+{
+  "mcpServers": {
+    "maxmcp": {
+      "type": "stdio",
+      "command": "node",
+      "args": [
+        "/path/to/websocket-mcp-bridge.js",
+        "ws://localhost:7400"
+      ]
+    }
+  }
+}
+```
+
+**Remote Access Example**:
+```json
+{
+  "mcpServers": {
+    "maxmcp-remote": {
+      "type": "stdio",
+      "command": "node",
+      "args": [
+        "/path/to/websocket-mcp-bridge.js",
+        "wss://gallery.example.com:7400",
+        "secret-token"
+      ]
+    }
+  }
+}
+```
 
 ---
 
@@ -143,27 +258,84 @@ class MaxMCP {
 ### 3. MCP Tools Implementation
 
 #### Required Tools List
-1. **Patch Management**
-   - `list_active_patches()` - List active patches
+
+**Phase 1 MVP (Implemented)** ✅:
+1. **Console Logging**
+   - ✅ `get_console_log(lines, clear)` - Retrieve Max Console messages
+
+2. **Patch Management**
+   - ✅ `list_active_patches()` - List active patches
+
+3. **Object Operations**
+   - ✅ `add_max_object(patch_id, obj_type, position, varname)` - Add Max object to patch
+
+**Phase 2 (Planned)**:
+4. **Patch Management (Extended)**
    - `get_patch_info(patch_id)` - Get patch details
    - `get_frontmost_patch()` - Get frontmost patch
 
-2. **Object Operations**
-   - `add_max_object(patch_id, position, obj_type, varname, args)`
+5. **Object Operations (Extended)**
    - `remove_max_object(patch_id, varname)`
    - `set_object_attribute(patch_id, varname, attr_name, value)`
 
-3. **Connection Management**
+6. **Connection Management**
    - `connect_max_objects(patch_id, src, outlet, dst, inlet)`
    - `disconnect_max_objects(patch_id, src, outlet, dst, inlet)`
 
-4. **Patch Information**
+7. **Patch Information**
    - `get_objects_in_patch(patch_id)`
    - `get_avoid_rect_position(patch_id)`
 
-5. **Documentation**
+8. **Documentation** (Optional)
    - `list_all_objects()`
    - `get_object_doc(object_name)`
+
+#### Console Logging Tool Specification
+
+**Tool**: `get_console_log`
+
+**Description**: Retrieve recent Max Console messages to monitor patch state and debug operations
+
+**Parameters**:
+```json
+{
+  "lines": {
+    "type": "number",
+    "description": "Number of recent log lines (default: 50, max: 1000)",
+    "optional": true
+  },
+  "filter": {
+    "type": "string",
+    "description": "Regex filter for log messages (optional)",
+    "optional": true
+  },
+  "clear": {
+    "type": "boolean",
+    "description": "Clear log after reading (default: false)",
+    "optional": true
+  }
+}
+```
+
+**Response**:
+```json
+{
+  "logs": [
+    "MaxMCP: Created cycle~ at [100, 100]",
+    "MaxMCP: Set varname to osc1",
+    "MaxMCP: Connected osc1[0] -> dac~[0]",
+    "dsp: audio on"
+  ],
+  "count": 4
+}
+```
+
+**Use Cases**:
+- Monitor object creation results
+- Detect connection errors
+- Debug tool execution
+- Verify patch state changes
+- Provide feedback to Claude for decision making
 
 #### MCP Tool Implementation Example
 ```cpp
@@ -337,7 +509,7 @@ MaxMCP/
 ```json
 {
   "name": "MaxMCP",
-  "version": "2.0.0",
+  "version": "1.0.0",
   "author": "Hiroshi Yamato",
   "description": "Native MCP server for Max/MSP - Control your patches with Claude Code using natural language",
   "website": "https://github.com/dropcontrol/MaxMCP",
