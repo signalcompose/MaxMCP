@@ -61,10 +61,8 @@ json ConsoleLogger::get_logs(size_t count, bool clear_after) {
     }
 
     return {
-        {"result", {
-            {"logs", logs},
-            {"count", actual_count}
-        }}
+        {"logs", logs},
+        {"count", actual_count}
     };
 }
 

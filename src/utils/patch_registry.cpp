@@ -40,6 +40,10 @@ void PatchRegistry::unregister_patch(t_maxmcp* patch) {
 json PatchRegistry::list_patches(const std::string& group_filter) {
     std::lock_guard<std::mutex> lock(mutex_);
 
+    // Debug: Log registry size
+    std::string debug_msg = "PatchRegistry::list_patches() - Registry size: " + std::to_string(patches_.size());
+    ConsoleLogger::log(debug_msg.c_str());
+
     json patches = json::array();
 
     for (auto* patch : patches_) {
@@ -71,17 +75,15 @@ json PatchRegistry::list_patches(const std::string& group_filter) {
         patches.push_back(patch_entry);
     }
 
-    // Build result
+    // Build result (without wrapping in "result" key - that's handled by MCP server)
     json result = {
-        {"result", {
-            {"patches", patches},
-            {"count", patches.size()}
-        }}
+        {"patches", patches},
+        {"count", patches.size()}
     };
 
     // Add filter info if filter was applied
     if (!group_filter.empty()) {
-        result["result"]["filter"] = {
+        result["filter"] = {
             {"group", group_filter}
         };
     }
@@ -141,9 +143,7 @@ json PatchRegistry::get_patch_info(const std::string& patch_id) {
         patch_info["group"] = group_name;
     }
 
-    return {
-        {"result", patch_info}
-    };
+    return patch_info;
 }
 
 json PatchRegistry::get_frontmost_patch() {
@@ -191,7 +191,5 @@ json PatchRegistry::get_frontmost_patch() {
         patch_info["group"] = group_name;
     }
 
-    return {
-        {"result", patch_info}
-    };
+    return patch_info;
 }
