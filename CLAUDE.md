@@ -303,6 +303,28 @@ gh pr create --base develop --head feature/123-add-object-tool
 2. **Update tests** to reflect new behavior
 3. **Run all tests** (`ctest --output-on-failure`)
 4. **Check for compiler warnings** (zero warnings policy)
+5. **Install package files to Max** if example patches or support files changed
+
+### Installing Package Files to Max
+
+**IMPORTANT**: After modifying files in `package/MaxMCP/`, you must copy them to Max Packages directory for testing.
+
+```bash
+# Copy entire package to Max
+cp -R package/MaxMCP ~/Documents/Max\ 9/Packages/
+
+# Or copy specific subdirectories
+cp -R package/MaxMCP/examples ~/Documents/Max\ 9/Packages/MaxMCP/
+cp -R package/MaxMCP/support ~/Documents/Max\ 9/Packages/MaxMCP/
+```
+
+**Files that require installation**:
+- `package/MaxMCP/examples/*.maxpat` - Example patches
+- `package/MaxMCP/patchers/*.maxpat` - Abstractions (maxmcp-bridge, etc.)
+- `package/MaxMCP/support/bridge/*` - Bridge Node.js files
+- `package/MaxMCP/package-info.json` - Package metadata
+
+**Note**: Binary files (`.mxo`) are installed automatically by CMake to `/Users/yamato/externals/`, then manually copied to Max.
 
 ### Deferred Issues Management Rule
 
@@ -352,16 +374,52 @@ gh issue comment <issue#> --body "Will be addressed in Phase 4, Task 4.4 (see do
 
 ### Building
 
+**Unified Binary Architecture (Phase 2+)**:
+- Single `maxmcp.mxo` with `@mode` attribute for role selection:
+  - `@mode agent`: MCP server mode
+  - `@mode patch`: Patch registration mode (default)
+- arm64 only (libwebsockets native dependency)
+- Auto-bundled dylibs: libwebsockets, libssl, libcrypto
+
 ```bash
-# Configure
+# Configure (no BUILD_MODE needed - always builds unified binary)
 cmake -B build -S . -DCMAKE_BUILD_TYPE=Debug
 
-# Build
+# Build (outputs to /Users/yamato/externals/maxmcp.mxo)
 cmake --build build
 
-# Install to Max Library
-cp build/maxmcp.mxo ~/Documents/Max\ 9/Library/
+# Install to Max Packages
+rm -rf "$HOME/Documents/Max 9/Packages/MaxMCP/externals/"*.mxo
+cp -R /Users/yamato/externals/maxmcp.mxo \
+      "$HOME/Documents/Max 9/Packages/MaxMCP/externals/"
+
+# Install package files (examples, support)
+cp -R package/MaxMCP/examples "$HOME/Documents/Max 9/Packages/MaxMCP/"
+cp -R package/MaxMCP/support "$HOME/Documents/Max 9/Packages/MaxMCP/"
 ```
+
+**🚨 CRITICAL: After building, you MUST copy to Max Packages AND restart Max**:
+1. **Build**: `cmake --build build` → outputs to `/Users/yamato/externals/maxmcp.mxo`
+2. **Deploy**: Remove old and copy new external to Max Packages (see commands above)
+3. **Restart Max**: Close and reopen Max application to load new binary
+
+**Why this matters**:
+- Max caches externals in memory
+- Simply building does NOT update running Max
+- Old external remains loaded until Max restarts
+- This is the most common source of "my changes don't work" issues
+
+**Usage**:
+```
+[maxmcp @mode agent]                              ← MCP server
+[maxmcp @mode patch @alias my-synth @group synth] ← Patch registration
+[maxmcp @alias my-synth @group synth]             ← Default mode (patch)
+```
+
+**Code Signing**:
+- CMake automatically applies ad-hoc signature
+- All bundled dylibs are re-signed after install_name_tool
+- Verify signature: `codesign -dv ~/Documents/Max\ 9/Packages/MaxMCP/externals/maxmcp.mxo`
 
 ### Testing
 
@@ -376,6 +434,40 @@ ctest -R PatchIDGeneration --verbose
 # With coverage (if enabled)
 ctest -T coverage
 ```
+
+### Development Workflow
+
+**🚨 CRITICAL: Always deploy changes to Max Package after modifications**
+
+Max only reads from `~/Documents/Max 9/Packages/MaxMCP/`. Changes in the project directory are not visible until deployed.
+
+#### Deploy External (.mxo)
+
+After building:
+```bash
+rm -rf "$HOME/Documents/Max 9/Packages/MaxMCP/externals/"*.mxo
+cp -R /Users/yamato/externals/maxmcp.mxo \
+      "$HOME/Documents/Max 9/Packages/MaxMCP/externals/"
+```
+
+#### Deploy Examples/Support Files
+
+After modifying files in `package/MaxMCP/`:
+```bash
+# Clean deploy (recommended)
+rm -rf ~/Documents/Max\ 9/Packages/MaxMCP/examples/
+cp -r package/MaxMCP/examples ~/Documents/Max\ 9/Packages/MaxMCP/
+
+# Or deploy entire package directory
+cp -r package/MaxMCP/support ~/Documents/Max\ 9/Packages/MaxMCP/
+```
+
+**Workflow**:
+1. Modify files in project directory
+2. Build if needed (`cmake --build build`)
+3. **Deploy to Max Package** (above commands)
+4. Test in Max
+5. Git commit
 
 ### Writing Tests
 

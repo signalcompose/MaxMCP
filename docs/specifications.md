@@ -22,7 +22,8 @@ Develop a native MCP server external object for Max/MSP, enabling Claude Code to
 
 ### Tech Stack (Confirmed)
 - **C/C++** (Max SDK 8.6+)
-- **stdio-based MCP** (No Socket.IO/Node.js)
+- **WebSocket** (libwebsockets 4.4.1)
+- **Node.js Bridge** (stdio-to-WebSocket translation)
 - **CMake** (Cross-platform builds)
 - **JSON** (nlohmann/json)
 
@@ -49,7 +50,126 @@ Develop a native MCP server external object for Max/MSP, enabling Claude Code to
 
 ### Architecture Approach
 
-**Single C++ External**: All MCP server functionality integrated into one compiled external object for Max/MSP.
+**Two-Component Design**: Separation of server and bridge responsibilities.
+
+- **maxmcp.server.mxo**: WebSocket server handling JSON-RPC over WebSocket
+- **websocket-mcp-bridge.js**: stdio-to-WebSocket bridge (Node.js)
+
+### Communication Protocol
+
+**WebSocket-based MCP JSON-RPC**:
+
+```
+Claude Code (stdio MCP)
+    ↓ stdin/stdout
+websocket-mcp-bridge.js (Node.js)
+    ↓ WebSocket (ws://localhost:7400)
+maxmcp.server.mxo (C++ / libwebsockets)
+    ↓ Max API
+Max/MSP Patches
+```
+
+### WebSocket Server (maxmcp.server.mxo)
+
+**Library**: libwebsockets 4.4.1
+**Protocol**: WebSocket over TCP
+**Default Port**: 7400 (chosen to avoid conflicts with other MCP servers like Serena)
+**Test Port**: 7401 (used in unit tests)
+**Message Format**: JSON-RPC 2.0 (text frames)
+
+**Connection Flow**:
+1. Client connects to `ws://localhost:7400` or `wss://remote:7400`
+2. Optional authentication via `Authorization: Bearer <token>` header
+3. Bidirectional JSON-RPC message exchange
+4. Server maintains connection until client disconnects or error occurs
+
+**Multi-Client Support**:
+- Server accepts multiple simultaneous WebSocket connections
+- Each client receives a unique client_id (UUID)
+- Requests are queued (FIFO) to ensure atomic patch operations
+- Thread-safe client list management
+
+**Example Request (WebSocket text frame)**:
+```json
+{"jsonrpc":"2.0","method":"tools/call","params":{"name":"add_max_object","arguments":{"patch_id":"synth_a7f2","obj_type":"cycle~","x":100,"y":100,"varname":"osc1","arguments":[440]}},"id":1}
+```
+
+**Example Response (WebSocket text frame)**:
+```json
+{"jsonrpc":"2.0","result":{"status":"success","patch_id":"synth_a7f2","varname":"osc1"},"id":1}
+```
+
+**Error Response**:
+```json
+{"jsonrpc":"2.0","error":{"code":-32700,"message":"Parse error"},"id":null}
+```
+
+**Authentication**:
+- Optional token-based authentication
+- Configured via `@auth` attribute: `[maxmcp.server @port 7400 @auth "secret-token"]`
+- Client must send `Authorization: Bearer secret-token` header
+- Unauthenticated connections are rejected with close code 1008 (Policy Violation)
+
+**Thread Safety**:
+1. libwebsockets event loop runs in background thread
+2. qelem defers JSON processing to Max main thread
+3. All Max API calls occur on main thread only
+4. Client list protected by mutex
+
+### WebSocket MCP Bridge (websocket-mcp-bridge.js)
+
+**Purpose**: Translate stdio MCP (Claude Code) to WebSocket (Max)
+
+**Implementation**:
+```javascript
+// stdin (Claude Code) → WebSocket (Max)
+process.stdin.on('data', (data) => {
+  ws.send(data.toString());
+});
+
+// WebSocket (Max) → stdout (Claude Code)
+ws.on('message', (data) => {
+  console.log(data.toString());
+});
+```
+
+**Usage**:
+```bash
+node websocket-mcp-bridge.js ws://localhost:7400 [auth-token]
+```
+
+**MCP Server Configuration** (`~/.claude.json`):
+```json
+{
+  "mcpServers": {
+    "maxmcp": {
+      "type": "stdio",
+      "command": "node",
+      "args": [
+        "/path/to/websocket-mcp-bridge.js",
+        "ws://localhost:7400"
+      ]
+    }
+  }
+}
+```
+
+**Remote Access Example**:
+```json
+{
+  "mcpServers": {
+    "maxmcp-remote": {
+      "type": "stdio",
+      "command": "node",
+      "args": [
+        "/path/to/websocket-mcp-bridge.js",
+        "wss://gallery.example.com:7400",
+        "secret-token"
+      ]
+    }
+  }
+}
+```
 
 ---
 
