@@ -303,6 +303,28 @@ gh pr create --base develop --head feature/123-add-object-tool
 2. **Update tests** to reflect new behavior
 3. **Run all tests** (`ctest --output-on-failure`)
 4. **Check for compiler warnings** (zero warnings policy)
+5. **Install package files to Max** if example patches or support files changed
+
+### Installing Package Files to Max
+
+**IMPORTANT**: After modifying files in `package/MaxMCP/`, you must copy them to Max Packages directory for testing.
+
+```bash
+# Copy entire package to Max
+cp -R package/MaxMCP ~/Documents/Max\ 9/Packages/
+
+# Or copy specific subdirectories
+cp -R package/MaxMCP/examples ~/Documents/Max\ 9/Packages/MaxMCP/
+cp -R package/MaxMCP/support ~/Documents/Max\ 9/Packages/MaxMCP/
+```
+
+**Files that require installation**:
+- `package/MaxMCP/examples/*.maxpat` - Example patches
+- `package/MaxMCP/patchers/*.maxpat` - Abstractions (maxmcp-bridge, etc.)
+- `package/MaxMCP/support/bridge/*` - Bridge Node.js files
+- `package/MaxMCP/package-info.json` - Package metadata
+
+**Note**: Binary files (`.mxo`) are installed automatically by CMake to `/Users/yamato/externals/`, then manually copied to Max.
 
 ### Deferred Issues Management Rule
 
@@ -352,16 +374,41 @@ gh issue comment <issue#> --body "Will be addressed in Phase 4, Task 4.4 (see do
 
 ### Building
 
+**Unified Binary Architecture (Phase 2+)**:
+- Single `maxmcp.mxo` with `@mode` attribute for role selection:
+  - `@mode agent`: MCP server mode
+  - `@mode patch`: Patch registration mode (default)
+- arm64 only (libwebsockets native dependency)
+- Auto-bundled dylibs: libwebsockets, libssl, libcrypto
+
 ```bash
-# Configure
+# Configure (no BUILD_MODE needed - always builds unified binary)
 cmake -B build -S . -DCMAKE_BUILD_TYPE=Debug
 
-# Build
+# Build (outputs to /Users/yamato/externals/maxmcp.mxo)
 cmake --build build
 
-# Install to Max Library
-cp build/maxmcp.mxo ~/Documents/Max\ 9/Library/
+# Install to Max Packages
+rm -rf "$HOME/Documents/Max 9/Packages/MaxMCP/externals/"*.mxo
+cp -R /Users/yamato/externals/maxmcp.mxo \
+      "$HOME/Documents/Max 9/Packages/MaxMCP/externals/"
+
+# Install package files (examples, support)
+cp -R package/MaxMCP/examples "$HOME/Documents/Max 9/Packages/MaxMCP/"
+cp -R package/MaxMCP/support "$HOME/Documents/Max 9/Packages/MaxMCP/"
 ```
+
+**Usage**:
+```
+[maxmcp @mode agent]                              ← MCP server
+[maxmcp @mode patch @alias my-synth @group synth] ← Patch registration
+[maxmcp @alias my-synth @group synth]             ← Default mode (patch)
+```
+
+**Code Signing**:
+- CMake automatically applies ad-hoc signature
+- All bundled dylibs are re-signed after install_name_tool
+- Verify signature: `codesign -dv ~/Documents/Max\ 9/Packages/MaxMCP/externals/maxmcp.mxo`
 
 ### Testing
 

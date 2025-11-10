@@ -23,17 +23,29 @@ MaxMCP is a native C++ external object for Max/MSP that acts as an MCP (Model Co
 ```
 Claude Code (MCP Client)
     ↕ stdio (JSON-RPC)
+Node.js Bridge (websocket-mcp-bridge.js)
+    ↕ WebSocket
 [maxmcp] C++ External Object
     ↕ Max API
 Max/MSP Patches
 ```
 
+**Components**:
+- **maxmcp.mxo**: Single unified external with two modes:
+  - `@mode agent`: WebSocket server, MCP protocol handler (1 per Max instance)
+  - `@mode patch`: Patch registration (1 per controllable patch, default)
+- **Bridge**: stdio ↔ WebSocket translator (Node.js, launched by Max)
+
 ## Tech Stack
 
 - **Language**: C/C++ (Max SDK 8.6+)
-- **Build System**: CMake
+- **Build System**: CMake 3.19+
+- **Architecture**: arm64 (Apple Silicon native)
 - **MCP Protocol**: stdio-based JSON-RPC
-- **JSON Library**: nlohmann/json
+- **JSON Library**: nlohmann/json 3.11.0+
+- **WebSocket**: libwebsockets (bundled)
+- **TLS**: OpenSSL 3.x (bundled)
+- **Code Signing**: Ad-hoc signature (auto-applied)
 - **Distribution**: Max Package
 
 ## Architecture Evolution
@@ -59,16 +71,51 @@ This implementation reimagines the previous approach:
 
 ## Quick Start
 
-1. Create new patch in Max
-2. Add object: `[maxmcp]`
-3. Open Claude Code
-4. Say: "Add a 440Hz oscillator to my patch"
+### 1. Install Dependencies (First Time Only)
+Open `00-setup.maxpat` from the MaxMCP package and click the message box to run npm install.
 
-That's it! No configuration needed.
+### 2. Start MCP Server
+Open `01-claude-code-connection.maxpat` and click "start" to launch the server and bridge.
+
+### 3. Configure Claude Code
+Run this command in your terminal:
+```bash
+claude mcp add maxmcp node ~/Documents/Max\ 9/Packages/MaxMCP/support/bridge/websocket-mcp-bridge.js ws://localhost:7400
+```
+
+### 4. Create Controllable Patch
+In your Max patch, add:
+```
+[maxmcp @mode patch @alias my-synth @group synth]
+```
+
+Or use default mode (patch):
+```
+[maxmcp @alias my-synth @group synth]
+```
+
+This registers your patch for Claude Code control.
+
+### 5. Control with Natural Language
+In Claude Code, say:
+- "List all active Max patches"
+- "Add a 440Hz oscillator to my-synth patch"
+
+**Note**: After modifying package files (examples, support), copy them to Max:
+```bash
+cp -R package/MaxMCP ~/Documents/Max\ 9/Packages/
+```
 
 ## Development Status
 
-**Current Phase**: Bootstrap (Setting up project structure)
+**Current Phase**: Phase 2 Complete (E2E WebSocket MCP Connection)
+
+✅ **Completed**:
+- Phase 1: Core external objects (maxmcp.agent, maxmcp.client)
+- Phase 2: WebSocket bridge, MCP protocol implementation, E2E connection
+
+🔄 **Next**:
+- Phase 3: Additional MCP tools, enhanced patch control
 
 See `docs/` for detailed specifications and development roadmap.
 

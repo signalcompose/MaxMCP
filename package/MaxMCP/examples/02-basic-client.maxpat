@@ -33,8 +33,8 @@
 			{
 				"box": {
 					"maxclass": "newobj",
-					"text": "maxmcp",
-					"patching_rect": [20, 120, 60, 22],
+					"text": "maxmcp @mode patch",
+					"patching_rect": [20, 120, 115, 22],
 					"numinlets": 0,
 					"numoutlets": 0,
 					"id": "obj-1"

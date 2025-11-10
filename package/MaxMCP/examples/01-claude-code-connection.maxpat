@@ -6,7 +6,7 @@
 			"minor": 0,
 			"revision": 0
 		},
-		"rect": [100, 100, 750, 500],
+		"rect": [100, 100, 950, 700],
 		"boxes": [
 			{
 				"box": {
@@ -103,8 +103,8 @@
 			{
 				"box": {
 					"maxclass": "newobj",
-					"text": "maxmcp.agent",
-					"patching_rect": [20, 280, 100, 22],
+					"text": "maxmcp @mode agent",
+					"patching_rect": [20, 280, 130, 22],
 					"numinlets": 1,
 					"numoutlets": 1,
 					"outlettype": [""],
@@ -120,6 +120,23 @@
 					"numoutlets": 1,
 					"outlettype": [""],
 					"id": "obj-bridge"
+				}
+			},
+			{
+				"box": {
+					"maxclass": "newobj",
+					"text": "maxmcp @mode patch @alias e2e-demo @group test",
+					"patching_rect": [400, 280, 280, 22],
+					"numinlets": 0,
+					"numoutlets": 0,
+					"id": "obj-client"
+				}
+			},
+			{
+				"box": {
+					"maxclass": "comment",
+					"text": "← Register this patch for Claude Code control",
+					"patching_rect": [630, 285, 280, 20]
 				}
 			},
 			{
@@ -225,7 +242,7 @@
 				"box": {
 					"maxclass": "panel",
 					"bgcolor": [0.2, 0.3, 0.4, 1.0],
-					"patching_rect": [10, 10, 720, 530]
+					"patching_rect": [10, 10, 920, 630]
 				}
 			}
 		],
