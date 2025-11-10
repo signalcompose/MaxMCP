@@ -1,6 +1,6 @@
 {
   "name": "MaxMCP",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "author": "signalcompose",
   "description": "MCP Server for Max/MSP - Control Max patches with Claude Code using natural language",
   "homepage": "https://github.com/signalcompose/MaxMCP",
