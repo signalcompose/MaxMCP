@@ -148,8 +148,9 @@ __pycache__/
 node_modules/
 npm-debug.log
 yarn-error.log
-package-lock.json
 yarn.lock
+
+# Note: package-lock.json is tracked for bridge/ to ensure reproducible CI builds
 
 # Node.js cache files
 .eslintcache
