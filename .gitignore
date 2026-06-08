@@ -171,6 +171,14 @@ credentials*
 !credentials.example.*
 # [/code:security-patterns]
 
+# Apple code signing / notarization secrets (NEVER commit)
+*.p8
+AuthKey_*.p8
+*.cer
+*.mobileprovision
+# Notarization archive produced by sign.sh
+build/maxmcp-notarize.zip
+
 # Development tools (MaxMCP-Dev only)
 .export-config.yml
 

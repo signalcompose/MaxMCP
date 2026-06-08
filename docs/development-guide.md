@@ -607,6 +607,75 @@ After deploy:
 1. Restart Max to load the updated external
 2. If using Claude Code with MCP, restart Claude Code to reconnect
 
+### 9.4 Code Signing & Notarization (macOS)
+
+For distribution (e.g. submission to the Cycling '74 Package Manager), the
+external must be signed with a **Developer ID Application** certificate and
+**notarized** by Apple, otherwise Gatekeeper blocks it on other users' Macs.
+This is handled by [`sign.sh`](../sign.sh).
+
+> ⚠️ **Security (public repo):** never commit signing secrets. The `.p12`
+> private key, App Store Connect API key (`AuthKey_*.p8`), Apple ID, and
+> app-specific passwords must stay local. Notarization credentials live in
+> the keychain (via `notarytool store-credentials`), never in a file in the
+> repo. `.gitignore` already blocks `*.p12`, `*.p8`, `*.cer`, etc. — keep it
+> that way. All identifiers below are placeholders.
+
+#### Prerequisites
+
+1. **Apple Developer Program** membership (the company account).
+2. A **Developer ID Application** certificate in your login keychain, with
+   its private key. Verify:
+   ```bash
+   security find-identity -v -p codesigning
+   # → "Developer ID Application: <COMPANY> (<TEAM_ID>)"
+   ```
+   If it is missing, either create it (Xcode → Settings → Accounts → Manage
+   Certificates → "+" → Developer ID Application; requires Account Holder, or
+   Admin if enabled by the Account Holder) or import a `.p12` exported from
+   the machine that created it.
+3. **App Store Connect API key** for notarization (recommended over an
+   Apple ID + app-specific password; no interactive password, CI-friendly).
+
+#### One-time: store notarization credentials
+
+```bash
+./sign.sh --setup-credentials
+# Stores credentials in the keychain under the profile "MaxMCPNotary".
+# Provide the App Store Connect API key (--key AuthKey_XXXX.p8 --key-id <KEY_ID>
+# --issuer <ISSUER_ID>), or Apple ID / Team ID / app-specific password.
+```
+
+#### Sign + notarize + staple
+
+```bash
+./build.sh Release      # produces package/MaxMCP/externals/maxmcp.mxo
+./sign.sh --sign-only   # optional: sign + verify only (quick cert check)
+./sign.sh               # sign + notarize + staple
+```
+
+`sign.sh` signs the bundled dylibs first (`libcrypto`, `libssl`,
+`libwebsockets`), then the bundle, all with hardened runtime and a secure
+timestamp. Max's own frameworks (`MaxAudioAPI`, `JitterAPI`) are referenced
+via `@executable_path` and provided by Max at runtime, so they are not
+bundled or signed.
+
+#### Verify on a clean Mac
+
+After notarization, confirm Gatekeeper acceptance on a Mac that has never
+seen the build (download via browser so the quarantine attribute is set):
+
+```bash
+xcrun stapler validate package/MaxMCP/externals/maxmcp.mxo
+codesign --verify --strict --verbose=2 package/MaxMCP/externals/maxmcp.mxo
+```
+
+> **Note:** the initial release targets **arm64 only** (Apple Silicon).
+> `package-info.json` declares `platform: ["aarch64"]` accordingly. Universal
+> Binary (arm64 + x86_64) is a follow-up — it requires universal builds of
+> `libwebsockets` and `openssl`, both permissively licensed (MIT / Apache 2.0)
+> and therefore free to rebuild and bundle.
+
 ---
 
 ## 10. Troubleshooting
