@@ -600,8 +600,18 @@ This script automatically:
 #### Typical workflow
 
 ```bash
+# Local development
 ./build.sh --test && ./deploy.sh
+
+# Distribution (signed): insert sign.sh between build and deploy
+./build.sh Release && ./sign.sh && ./deploy.sh
 ```
+
+The order matters for distribution: `sign.sh` must run **after** `build.sh`
+(which produces the external) and **before** `deploy.sh` (which copies the
+package). `cp -R`/`ditto` preserve the code signature and stapled ticket, so
+the deployed copy stays signed and notarized. Running only `build → deploy`
+ships an ad-hoc-signed build that other Macs will reject. See 9.4 below.
 
 After deploy:
 1. Restart Max to load the updated external
