@@ -10,8 +10,7 @@
   "max_version_max": "none",
   "os": {
     "macintosh": {
-      "min_version": "13.0",
-      "platform": ["aarch64"]
+      "min_version": "11.0"
     }
   },
   "package_extra": {
