@@ -40,6 +40,9 @@ ZIP_PATH="$BUILD_DIR/maxmcp-notarize.zip"
 
 SIGN_IDENTITY="${MAXMCP_SIGN_IDENTITY:-Developer ID Application}"
 NOTARY_PROFILE="${MAXMCP_NOTARY_PROFILE:-MaxMCPNotary}"
+# The Max SDK leaves CFBundleIdentifier as ".", which is invalid for
+# notarization. Override it at signing time with a proper reverse-DNS id.
+BUNDLE_ID="${MAXMCP_BUNDLE_ID:-com.signalcompose.maxmcp}"
 
 # --- One-time credential setup -------------------------------------------
 # Stores an App Store Connect API key (or Apple ID app-specific password)
@@ -84,8 +87,9 @@ for dylib in "$MXO"/Contents/Frameworks/*.dylib; do
 done
 
 # --- Sign the bundle (after its contents) --------------------------------
-echo "[3/6] Signing bundle..."
+echo "[3/6] Signing bundle (identifier: $BUNDLE_ID)..."
 codesign --force --timestamp --options runtime \
+    --identifier "$BUNDLE_ID" \
     --sign "$SIGN_IDENTITY" "$MXO"
 
 # --- Verify signature ----------------------------------------------------
