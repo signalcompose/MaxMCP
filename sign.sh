@@ -86,14 +86,25 @@ for dylib in "$MXO"/Contents/Frameworks/*.dylib; do
     echo "    signed: $(basename "$dylib")"
 done
 
+# --- Fix Info.plist identifier before signing -----------------------------
+# The Max SDK's Info.plist.in leaves CFBundleIdentifier as "." (its
+# @AUTHOR_DOMAIN@.@BUNDLE_IDENTIFIER@ template variables aren't resolved by
+# the Makefile/Ninja generators). If we only override the identifier in the
+# Code Directory via `codesign --identifier` and leave Info.plist as ".",
+# the two disagree and Gatekeeper rejects the bundle at runtime with
+# GatekeeperPolicyScanError -67018 "Code did not match any currently
+# allowed policy", even though signing and notarization both succeed.
+echo "[3/7] Fixing CFBundleIdentifier in Info.plist (identifier: $BUNDLE_ID)..."
+/usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier $BUNDLE_ID" "$MXO/Contents/Info.plist"
+
 # --- Sign the bundle (after its contents) --------------------------------
-echo "[3/6] Signing bundle (identifier: $BUNDLE_ID)..."
+echo "[4/7] Signing bundle (identifier: $BUNDLE_ID)..."
 codesign --force --timestamp --options runtime \
     --identifier "$BUNDLE_ID" \
     --sign "$SIGN_IDENTITY" "$MXO"
 
 # --- Verify signature ----------------------------------------------------
-echo "[4/6] Verifying signature..."
+echo "[5/7] Verifying signature..."
 codesign --verify --strict --verbose=2 "$MXO"
 echo "    OK"
 
@@ -104,7 +115,7 @@ if [ "$SIGN_ONLY" = true ]; then
 fi
 
 # --- Notarize ------------------------------------------------------------
-echo "[5/6] Notarizing (this may take a few minutes)..."
+echo "[6/7] Notarizing (this may take a few minutes)..."
 mkdir -p "$BUILD_DIR"
 rm -f "$ZIP_PATH"
 # notarytool requires an archive; zip the bundle preserving its top folder.
@@ -114,7 +125,7 @@ xcrun notarytool submit "$ZIP_PATH" \
     --wait
 
 # --- Staple --------------------------------------------------------------
-echo "[6/6] Stapling ticket..."
+echo "[7/7] Stapling ticket..."
 xcrun stapler staple "$MXO"
 xcrun stapler validate "$MXO"
 
